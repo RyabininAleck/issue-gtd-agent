@@ -27,11 +27,9 @@
 ### 1. Создайте свой репозиторий и скопируйте код
 
 ```bash
-# Клонируйте этот репозиторий
 git clone https://github.com/your-org/issue-gtd-agent.git my-gtd
 cd my-gtd
 
-# Смените remote на свой приватный репозиторий (создайте его заранее на GitHub)
 git remote set-url origin https://github.com/YOUR_USERNAME/YOUR_REPO.git
 
 git push -u origin main
