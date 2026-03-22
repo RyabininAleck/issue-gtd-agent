@@ -2,6 +2,7 @@ defaults:
   model: gpt-5.2
   repo: 1188132468
   project: 9
+
 columns:
   inbox:
     file: stages/INBOX.md
