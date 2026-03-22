@@ -1,0 +1,33 @@
+name: 'Setup Python Environment'
+description: 'Setup Python with pip cache and install dependencies from requirements file'
+
+inputs:
+  python-version:
+    description: 'Python version to use'
+    required: false
+    default: '3.11'
+  requirements-file:
+    description: 'Path to requirements.txt file'
+    required: true
+  extra-packages:
+    description: 'Additional pip packages to install (space-separated)'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+        cache: 'pip'
+        cache-dependency-path: ${{ inputs.requirements-file }}
+
+    - name: Install Python dependencies
+      shell: bash
+      run: |
+        pip install -r ${{ inputs.requirements-file }}
+        if [ -n "${{ inputs.extra-packages }}" ]; then
+          pip install ${{ inputs.extra-packages }}
+        fi

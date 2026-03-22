@@ -1,0 +1,65 @@
+name: 'Issue to text'
+description: 'Получить issue по номеру через gh api и собрать текст в формате .github/prompts/issue_to_text.prompt.md'
+
+inputs:
+  issue-number:
+    description: 'Номер issue'
+    required: true
+
+outputs:
+  text:
+    description: 'Текст issue в формате issue_to_text.prompt.md'
+    value: ${{ steps.issue-to-text.outputs.text }}
+  column:
+    description: 'Название колонки проекта (status)'
+    value: ${{ steps.issue-to-text.outputs.column }}
+
+runs:
+  using: composite
+  steps:
+    - id: issue-to-text
+      shell: bash
+      env:
+        REPO: ${{ github.repository }}
+        ISSUE_NUMBER: ${{ inputs.issue-number }}
+      run: |
+        set -euo pipefail
+
+        issue_path="repos/${REPO}/issues/${ISSUE_NUMBER}"
+
+        issue_json=$(gh api "${issue_path}")
+        comments_json=$(
+          gh api --paginate "${issue_path}/comments" | jq -s 'add // []'
+        )
+
+        issue_number=$(echo "${issue_json}" | jq -r '.number')
+        issue_url=$(echo "${issue_json}" | jq -r '.html_url // ""')
+        issue_title=$(echo "${issue_json}" | jq -r '.title // ""')
+        issue_body=$(echo "${issue_json}" | jq -r '.body // ""')
+
+        issue_comments=$(echo "${comments_json}" | jq -r '
+          if length == 0 then "Нет комментариев"
+          else
+            map("[\(.created_at)] @\(.user.login // "Unknown"):\n\(.body // "")")
+            | join("\n---\n")
+          end
+        ')
+
+        # If caller already knows the column (e.g., classic project_card event),
+        # allow passing it via env to avoid extra API calls / permission issues.
+        column="${COLUMN:-}"
+        if [ -z "${column}" ]; then
+          column=$(gh issue view "${ISSUE_NUMBER}" -R "${REPO}" --json projectItems -q '.projectItems[0].status.name // empty')
+        fi
+        echo "column=${column}" >> "${GITHUB_OUTPUT}"
+
+        {
+          echo "text<<EOF"
+          printf '%s\n' \
+            "URL: ${issue_url}" \
+            "## Issue #${issue_number} ${issue_title}" \
+            "${issue_body}" \
+            "Комментарии:" \
+            "${issue_comments}"
+          echo "EOF"
+        } >> "${GITHUB_OUTPUT}"

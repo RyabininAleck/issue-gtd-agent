@@ -1,0 +1,47 @@
+name: 'Commit and Push'
+description: 'Configure git, stage files, commit if changes exist, and push'
+
+inputs:
+  add-path:
+    description: 'Path pattern to git add (e.g., "issues/" or "*.md")'
+    required: true
+  message:
+    description: 'Commit message'
+    required: true
+  add-all:
+    description: 'Use git add -A instead of git add for the path'
+    required: false
+    default: 'false'
+
+outputs:
+  committed:
+    description: 'Whether a commit was made (true/false)'
+    value: ${{ steps.commit.outputs.committed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure git
+      shell: bash
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+    - name: Stage and commit changes
+      id: commit
+      shell: bash
+      run: |
+        if [ "${{ inputs.add-all }}" == "true" ]; then
+          git add -A "${{ inputs.add-path }}"
+        else
+          git add --ignore-unmatch "${{ inputs.add-path }}"
+        fi
+        
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+          echo "committed=false" >> $GITHUB_OUTPUT
+        else
+          git commit -m "${{ inputs.message }}"
+          git push
+          echo "committed=true" >> $GITHUB_OUTPUT
+        fi

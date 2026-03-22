@@ -1,0 +1,46 @@
+name: Init
+
+on:
+  workflow_dispatch:
+
+jobs:
+  init:
+    name: Init
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Stage 1 — check required secrets
+        shell: bash
+        env:
+          PERSONAL_ACCESS_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          [ -n "$PERSONAL_ACCESS_TOKEN" ] && echo "PERSONAL_ACCESS_TOKEN=OK" || (echo "PERSONAL_ACCESS_TOKEN=EMPTY" && exit 1)
+
+      - name: Install yq
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: GitHub Project v2 + settings.yml (gh api / graphql)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+          bash "${GITHUB_WORKSPACE}/.github/scripts/init_github_project.sh"
+
+      - name: Commit and push changes
+        uses: ./.github/actions/commit-and-push
+        with:
+          add-path: .
+          add-all: 'true'
+          message: "📝 Init: GitHub Project + settings.yml ($(date +%Y-%m-%d))"

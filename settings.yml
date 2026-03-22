@@ -1,0 +1,24 @@
+defaults:
+  model: gpt-5.2
+  repo: 1188132468
+  project: 9
+columns:
+  inbox:
+    file: stages/INBOX.md
+  next actions:
+    file: stages/NEXT-ACTIONS.md
+  projects:
+    file: stages/PROJECTS.md
+  calendar:
+    file: stages/CALENDAR.md
+  waiting:
+    file: stages/WAITING-FOR.md
+  someday:
+    file: stages/SOMEDAY-MAYBE.md
+  reference:
+    file: stages/REFERENCE.md
+  trash:
+    file: stages/TRASH.md
+  done:
+    file: stages/DONE.md
+    model: gpt-5.2

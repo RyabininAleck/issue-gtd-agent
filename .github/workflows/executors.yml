@@ -1,0 +1,137 @@
+name: Executors
+
+on:
+  issues:
+    types: [opened, closed]
+  issue_comment:
+    types: [created, edited]
+  project_card:
+    types: [created, moved]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Issue number to process'
+        required: false
+        type: number
+
+jobs:
+  executors:
+    name: Executors
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: write
+      repository-projects: read
+    env:
+     GH_TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/download/v4.44.1/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+
+      - name: Resolve issue number / column (all event types)
+        id: ctx
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          event_name="${{ github.event_name }}"
+
+          issue_number=""
+          column=""
+
+          if [ "${event_name}" = "workflow_dispatch" ]; then
+            issue_number="${{ inputs.issue_number }}"
+          elif [ "${event_name}" = "issues" ] || [ "${event_name}" = "issue_comment" ]; then
+            issue_number="${{ github.event.issue.number }}"
+          elif [ "${event_name}" = "project_card" ]; then
+            # Classic Projects: derive issue_number and column name via API.
+            card_url="${{ github.event.project_card.url }}"
+            card_json="$(gh api "${card_url}")"
+            content_url="$(echo "${card_json}" | jq -r '.content_url // empty')"
+            column_url="$(echo "${card_json}" | jq -r '.column_url // empty')"
+            if [ -n "${column_url}" ]; then
+              column="$(gh api "${column_url}" -q '.name // empty')"
+            fi
+            if [ -n "${content_url}" ]; then
+              issue_number="$(gh api "${content_url}" -q '.number // empty')"
+            fi
+          fi
+
+          if [ -z "${issue_number}" ]; then
+            echo "Unable to resolve issue_number for event '${event_name}'." >&2
+            exit 1
+          fi
+
+          echo "issue_number=${issue_number}" >> "${GITHUB_OUTPUT}"
+          echo "column=${column}" >> "${GITHUB_OUTPUT}"
+
+      - name: Issue to text
+        id: issue_to_text
+        uses: ./.github/actions/issue-to-text
+        env:
+          COLUMN: ${{ steps.ctx.outputs.column }}
+        with:
+          issue-number: ${{ steps.ctx.outputs.issue_number }}
+
+      - name: Map column to prompt-file
+        id: map_prompt
+        run: |
+          set -euo pipefail
+          column_key=$(echo "${{ steps.issue_to_text.outputs.column }}" | tr '[:upper:]' '[:lower:]')
+          prompt_file=$(column_key="$column_key" yq '.columns[env(column_key)].file' settings.yml)
+          model=$(column_key="$column_key" yq '(.columns[env(column_key)].model // .defaults.model)' settings.yml)
+          
+          if [ -z "${column_key}" ] || [ "${prompt_file}" = "null" ] || [ -z "${prompt_file}" ]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            echo "reason=No mapping for column '${column_key}' in settings.yml" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          echo "skip=false" >> "${GITHUB_OUTPUT}"
+          echo "prompt-file=${prompt_file}" >> "${GITHUB_OUTPUT}"
+          echo "model=${model}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build prompt from template
+        id: build_prompt
+        if: steps.map_prompt.outputs.skip != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "prompt<<EOF"
+            echo "$(cat COMMON.md)"
+            echo "$(cat "${{ steps.map_prompt.outputs.prompt-file }}")"
+            echo "${{ steps.issue_to_text.outputs.text }}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Setup Cursor CLI with MCP
+        if: steps.map_prompt.outputs.skip != 'true'
+        uses: ./.github/actions/setup-cursor-mcp
+        with:
+          cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+          github-mcp-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run Cursor Agent
+        id: cursor_agent
+        if: steps.map_prompt.outputs.skip != 'true'
+        uses: ./.github/actions/cursor-agent-run
+        with:
+          prompt: ${{ steps.build_prompt.outputs.prompt }}
+          model: ${{ steps.map_prompt.outputs.model }}
+          cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+
+      - name: Commit and push facts
+        if: steps.map_prompt.outputs.skip != 'true'
+        uses: ./.github/actions/commit-and-push
+        with:
+          add-path: .
+          add-all: 'true'
+          message: "📝 Facts from done tasks: $(date +%Y-%m-%d)"

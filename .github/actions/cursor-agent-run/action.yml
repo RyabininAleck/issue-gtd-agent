@@ -1,0 +1,95 @@
+name: 'Run Cursor Agent'
+description: 'Запуск Cursor Agent CLI с промптом. MCP при необходимости настройте отдельным шагом setup-cursor-mcp.'
+
+inputs:
+  prompt:
+    description: 'Задача / промпт для агента'
+    required: true
+  cursor-api-key:
+    description: 'Cursor API key. Если не задан, используется переменная окружения CURSOR_API_KEY (в workflow задайте env: CURSOR_API_KEY и передайте значение из secrets).'
+    required: false
+    default: ''
+  model:
+    description: 'Идентификатор модели (по умолчанию — Sonnet thinking)'
+    required: false
+    default: 'claude-4.6-sonnet-medium-thinking'
+  github-token:
+    description: 'Необязательно. Если задан, экспортируется как GH_TOKEN для команд gh в терминале агента.'
+    required: false
+    default: ''
+
+outputs:
+  result:
+    description: 'Итоговый текст из последнего события stream-json с type=result'
+    value: ${{ steps.agent.outputs.result }}
+  exit-code:
+    description: 'Код выхода процесса agent'
+    value: ${{ steps.agent.outputs.exit-code }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install Cursor CLI
+      shell: bash
+      run: curl https://cursor.com/install -fsS | bash
+
+    - name: Add Cursor to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - id: agent
+      name: Run agent
+      shell: bash
+      env:
+        PROMPT: ${{ inputs.prompt }}
+        CURSOR_API_KEY_INPUT: ${{ inputs.cursor-api-key }}
+        GH_TOKEN_INPUT: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+
+        if [[ -n "${GH_TOKEN_INPUT:-}" ]]; then
+          export GH_TOKEN="${GH_TOKEN_INPUT}"
+        fi
+
+        api_key="${CURSOR_API_KEY_INPUT:-}"
+        if [[ -z "${api_key}" ]]; then
+          api_key="${CURSOR_API_KEY:-}"
+        fi
+        if [[ -z "${api_key}" ]]; then
+          echo "::error::Укажите inputs.cursor-api-key или переменную окружения CURSOR_API_KEY" >&2
+          exit 1
+        fi
+
+        workspace="${GITHUB_WORKSPACE:-.}"
+        model="${{ inputs.model }}"
+
+        stdout_file=$(mktemp)
+        stderr_file=$(mktemp)
+        trap 'rm -f "$stdout_file" "$stderr_file"' EXIT
+
+        set +e
+        set -o pipefail
+        agent -p "$PROMPT" \
+          --workspace "$workspace" \
+          --force --approve-mcps --trust \
+          --output-format stream-json \
+          --stream-partial-output \
+          --model "$model" \
+          --api-key "$api_key" \
+          2> >(tee "$stderr_file" >&2) | tee "$stdout_file" | bash "${GITHUB_ACTION_PATH}/format_agent_stream_log.sh"
+        exit_code=${PIPESTATUS[0]}
+        set +o pipefail
+        set -e
+
+        result=$(jq -rs 'map(select(.type=="result")) | last | .result // empty' "$stdout_file" 2>/dev/null || true)
+
+        delim="cursor_agent_result_$(openssl rand -hex 16)"
+        {
+          echo "result<<${delim}"
+          printf '%s\n' "${result}"
+          echo "${delim}"
+        } >> "${GITHUB_OUTPUT}"
+
+        echo "exit-code=${exit_code}" >> "${GITHUB_OUTPUT}"
+
+        exit "${exit_code}"

@@ -1,0 +1,67 @@
+name: Backup Issues → Markdown
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+jobs:
+  backup-issues-to-markdown:
+    name: Backup issues & PRs to Markdown
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout repository (issues + .github only)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+          sparse-checkout: |
+            issues/
+            .github/
+
+      - name: Setup Python environment
+        uses: ./.github/actions/setup-python-env
+        with:
+          requirements-file: .github/requirements.txt
+
+      - name: Verify PERSONAL_ACCESS_TOKEN
+        run: |
+          if [ -z "${{ secrets.PERSONAL_ACCESS_TOKEN }}" ]; then
+            echo "ERROR: PERSONAL_ACCESS_TOKEN is empty!"
+            exit 1
+          fi
+          echo "Token length: ${#TOKEN}"
+          echo "Testing token with GitHub API..."
+          curl -s -H "Authorization: token $TOKEN" https://api.github.com/user | jq -r '.login // "ERROR: Invalid token"'
+        env:
+          TOKEN: ${{ secrets.PERSONAL_ACCESS_TOKEN }}
+
+      - name: Fetch issues, PRs, comments via GitHub API
+        run: |
+          github-backup ${{ github.repository_owner }} \
+            -t ${{ secrets.PERSONAL_ACCESS_TOKEN }} \
+            -o ./temp \
+            -R ${{ github.event.repository.name }} \
+            -P \
+            --issues \
+            --issue-comments \
+            --issue-events
+
+      - name: Copy JSON to issues/ folder
+        run: |
+          mkdir -p issues
+          cp temp/repositories/${{ github.event.repository.name }}/issues/*.json issues/ 2>/dev/null || true
+          rm -rf temp
+
+      - name: Convert JSON → Markdown files
+        run: python .github/scripts/rename_issues.py
+
+      - name: Commit and push issues backup
+        uses: ./.github/actions/commit-and-push
+        with:
+          add-path: issues/
+          add-all: 'true'
+          message: "Issues backup: ${{ github.event_name }}"

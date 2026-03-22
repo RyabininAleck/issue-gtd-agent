@@ -1,0 +1,38 @@
+name: 'Process Issue with Custom Prompt'
+description: 'Обрабатывает issue с помощью Cursor Agent и кастомного промпта'
+
+inputs:
+  issue-number:
+    description: 'Номер issue для обработки'
+    required: true
+  column:
+    description: 'Название столбца проекта (опционально)'
+    required: false
+  prompt-file:
+    description: 'Путь к файлу с промптом (относительно корня репозитория)'
+    required: true
+  personal-access-token:
+    description: 'Personal Access Token для checkout'
+    required: true
+  cursor-api-key:
+    description: 'Cursor API Key'
+    required: true
+  github-token:
+    description: 'GitHub Token для работы с API'
+    required: true
+  github-mcp-token:
+    description: 'GitHub Token для MCP'
+    required: true
+
+outputs:
+  result:
+    description: 'Результат работы Cursor Agent'
+    value: ${{ steps.cursor_agent.outputs.result }}
+  issue-text:
+    description: 'Текст issue'
+    value: ${{ steps.issue_to_text.outputs.text }}
+
+runs:
+  using: 'composite'
+  steps:
+

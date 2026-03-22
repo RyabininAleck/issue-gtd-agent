@@ -1,0 +1,40 @@
+name: 'Setup Cursor CLI with MCP'
+description: 'Install Cursor CLI and configure MCP servers for agent usage'
+
+inputs:
+  cursor-api-key:
+    description: 'Cursor API key for agent commands'
+    required: true
+  github-mcp-token:
+    description: 'GitHub token for MCP server'
+    required: true
+  mcp-config-path:
+    description: 'Path to mcp.json config in repository'
+    required: false
+    default: '.cursor/mcp.json'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Cursor CLI
+      shell: bash
+      run: curl https://cursor.com/install -fsS | bash
+
+    - name: Add Cursor to PATH
+      shell: bash
+      run: echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+    - name: Configure MCP servers
+      shell: bash
+      env:
+        GITHUB_MCP_TOKEN: ${{ inputs.github-mcp-token }}
+      run: |
+        mkdir -p ~/.cursor
+        cat "${{ inputs.mcp-config-path }}" | sed "s|\${GITHUB_MCP_TOKEN}|$GITHUB_MCP_TOKEN|g" > ~/.cursor/mcp.json
+
+    - name: Enable MCP servers
+      shell: bash
+      env:
+        CURSOR_API_KEY: ${{ inputs.cursor-api-key }}
+      run: |
+        agent mcp enable github || true
